@@ -36,6 +36,7 @@ class PublishServiceTest {
     @Mock private SocialAdapterRegistry adapterRegistry;
     @Mock private UserRepository userRepository;
     @Mock private SocialMediaAdapter adapter;
+    @Mock private GoogleTokenRefresher googleTokenRefresher;
 
     @InjectMocks private PublishService publishService;
 
@@ -89,7 +90,7 @@ class PublishServiceTest {
         when(socialAccountService.getActiveAccount(userId, socialAccount.getId())).thenReturn(socialAccount);
         when(s3Service.generatePresignedUrl(any(), anyLong())).thenReturn("https://s3.example.com/file.mp4");
         when(adapterRegistry.get(Platform.TWITTER)).thenReturn(adapter);
-        when(adapter.publish(any(), any(), any(), any(), any())).thenReturn("tweet-id-123");
+        when(adapter.publish(any(), any(), any(), any(), any(), any())).thenReturn("tweet-id-123");
         when(publishLogRepository.save(any(PublishLog.class))).thenAnswer(inv -> inv.getArgument(0));
 
         PublishResponse result = publishService.publish(userId, publishRequest);
@@ -98,7 +99,7 @@ class PublishServiceTest {
         assertThat(result.getExternalPostId()).isEqualTo("tweet-id-123");
         assertThat(result.getPlatform()).isEqualTo(Platform.TWITTER);
         verify(adapter).publish(
-                eq("oauth-access-token"), isNull(),
+                eq("@mouad_toto"), eq("oauth-access-token"), isNull(),
                 eq("https://s3.example.com/file.mp4"),
                 eq("Test post title"), eq("Test description")
         );
@@ -111,7 +112,7 @@ class PublishServiceTest {
         when(socialAccountService.getActiveAccount(userId, socialAccount.getId())).thenReturn(socialAccount);
         when(s3Service.generatePresignedUrl(any(), anyLong())).thenReturn("https://s3.example.com/file.mp4");
         when(adapterRegistry.get(Platform.TWITTER)).thenReturn(adapter);
-        when(adapter.publish(any(), any(), any(), any(), any()))
+        when(adapter.publish(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RuntimeException("Twitter rate limit exceeded"));
         when(publishLogRepository.save(any(PublishLog.class))).thenAnswer(inv -> inv.getArgument(0));
 

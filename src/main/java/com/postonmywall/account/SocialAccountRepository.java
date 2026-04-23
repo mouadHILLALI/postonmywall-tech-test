@@ -18,4 +18,6 @@ public interface SocialAccountRepository extends JpaRepository<SocialAccount, UU
     Optional<SocialAccount> findByIdAndUserIdAndActiveTrue(UUID id, UUID userId);
 
     boolean existsByUserIdAndPlatformAndAccountId(UUID userId, Platform platform, String accountId);
+
+    Optional<SocialAccount> findByUserIdAndPlatformAndAccountId(UUID userId, Platform platform, String accountId);
 }

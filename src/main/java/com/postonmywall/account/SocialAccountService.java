@@ -2,11 +2,13 @@ package com.postonmywall.account;
 
 import com.postonmywall.auth.User;
 import com.postonmywall.auth.UserRepository;
+import com.postonmywall.common.Platform;
 import com.postonmywall.exception.ResourceAlreadyExistsException;
 import com.postonmywall.exception.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -59,6 +61,40 @@ public class SocialAccountService {
                 .orElseThrow(() -> new ResourceNotFoundException("Social account not found"));
         account.setActive(false);
         socialAccountRepository.save(account);
+    }
+
+    public void updateAccessToken(UUID accountId, String newAccessToken) {
+        SocialAccount account = socialAccountRepository.findById(accountId)
+                .orElseThrow(() -> new ResourceNotFoundException("Social account not found: " + accountId));
+        account.setAccessToken(newAccessToken);
+        socialAccountRepository.save(account);
+    }
+
+    public SocialAccountResponse upsertOAuthAccount(UUID userId, Platform platform,
+                                                    String accountId, String accessToken,
+                                                    String refreshToken, Instant tokenExpiresAt) {
+        SocialAccount account = socialAccountRepository
+                .findByUserIdAndPlatformAndAccountId(userId, platform, accountId)
+                .orElse(null);
+
+        if (account == null) {
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+            account = SocialAccount.builder()
+                    .user(user)
+                    .platform(platform)
+                    .accountId(accountId)
+                    .active(true)
+                    .build();
+        } else {
+            account.setActive(true);
+        }
+
+        account.setAccessToken(accessToken);
+        account.setRefreshToken(refreshToken);
+        account.setTokenExpiresAt(tokenExpiresAt);
+
+        return toResponse(socialAccountRepository.save(account));
     }
 
     // Used internally by PublishService and SchedulerService

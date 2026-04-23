@@ -4,9 +4,11 @@ import com.postonmywall.account.SocialAccount;
 import com.postonmywall.account.SocialAccountService;
 import com.postonmywall.auth.User;
 import com.postonmywall.auth.UserRepository;
+import com.postonmywall.common.Platform;
 import com.postonmywall.common.PublishStatus;
 import com.postonmywall.exception.BusinessException;
 import com.postonmywall.exception.ResourceNotFoundException;
+import com.postonmywall.exception.SocialApiException;
 import com.postonmywall.file.MediaFile;
 import com.postonmywall.file.MediaFileService;
 import com.postonmywall.file.S3Service;
@@ -34,19 +36,22 @@ public class PublishService {
     private final S3Service s3Service;
     private final SocialAdapterRegistry adapterRegistry;
     private final UserRepository userRepository;
+    private final GoogleTokenRefresher googleTokenRefresher;
 
     public PublishService(PublishLogRepository publishLogRepository,
                           MediaFileService mediaFileService,
                           SocialAccountService socialAccountService,
                           S3Service s3Service,
                           SocialAdapterRegistry adapterRegistry,
-                          UserRepository userRepository) {
+                          UserRepository userRepository,
+                          GoogleTokenRefresher googleTokenRefresher) {
         this.publishLogRepository = publishLogRepository;
         this.mediaFileService = mediaFileService;
         this.socialAccountService = socialAccountService;
         this.s3Service = s3Service;
         this.adapterRegistry = adapterRegistry;
         this.userRepository = userRepository;
+        this.googleTokenRefresher = googleTokenRefresher;
     }
 
     public PublishResponse publish(UUID userId, PublishRequest request) {
@@ -72,13 +77,33 @@ public class PublishService {
             String mediaUrl = s3Service.generatePresignedUrl(mediaFile.getS3Key(), 30);
             SocialMediaAdapter adapter = adapterRegistry.get(socialAccount.getPlatform());
 
-            String externalPostId = adapter.publish(
-                    socialAccount.getAccessToken(),
-                    socialAccount.getTokenSecret(),
-                    mediaUrl,
-                    request.getTitle(),
-                    request.getDescription()
-            );
+            String externalPostId;
+            try {
+                externalPostId = adapter.publish(
+                        socialAccount.getAccountId(),
+                        socialAccount.getAccessToken(),
+                        socialAccount.getTokenSecret(),
+                        mediaUrl,
+                        request.getTitle(),
+                        request.getDescription()
+                );
+            } catch (SocialApiException ex) {
+                if (isTokenExpired(ex) && socialAccount.getPlatform() == Platform.YOUTUBE
+                        && socialAccount.getTokenSecret() != null) {
+                    String newToken = googleTokenRefresher.refresh(socialAccount.getTokenSecret());
+                    socialAccountService.updateAccessToken(socialAccount.getId(), newToken);
+                    externalPostId = adapter.publish(
+                            socialAccount.getAccountId(),
+                            newToken,
+                            socialAccount.getTokenSecret(),
+                            mediaUrl,
+                            request.getTitle(),
+                            request.getDescription()
+                    );
+                } else {
+                    throw ex;
+                }
+            }
 
             publishLog.setExternalPostId(externalPostId);
             publishLog.setStatus(PublishStatus.PUBLISHED);
@@ -146,6 +171,11 @@ public class PublishService {
                 log.error("Scheduled publish failed for job id={}", job.getId(), ex);
             }
         });
+    }
+
+    private boolean isTokenExpired(SocialApiException ex) {
+        String msg = ex.getMessage();
+        return msg != null && (msg.contains("HTTP 401") || msg.contains("UNAUTHENTICATED"));
     }
 
     private PublishResponse toResponse(PublishLog log) {

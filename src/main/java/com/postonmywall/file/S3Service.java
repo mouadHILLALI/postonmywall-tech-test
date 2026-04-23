@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -57,6 +58,28 @@ public class S3Service {
     public void delete(String key) {
         s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(key).build());
         log.info("Deleted file from S3: key={}", key);
+    }
+
+    public String generateKey(UUID userId, String originalFilename) {
+        String extension = "";
+        if (originalFilename != null && originalFilename.contains(".")) {
+            extension = "." + originalFilename.substring(originalFilename.lastIndexOf('.') + 1);
+        }
+        return "media/" + userId + "/" + UUID.randomUUID() + extension;
+    }
+
+    public String generatePresignedPutUrl(String key, String contentType) {
+        PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(15))
+                .putObjectRequest(PutObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(key)
+                        .contentType(contentType)
+                        .build())
+                .build();
+        String url = s3Presigner.presignPutObject(presignRequest).url().toString();
+        log.info("Generated presigned PUT URL for key={}", key);
+        return url;
     }
 
     public String generatePresignedUrl(String key) {

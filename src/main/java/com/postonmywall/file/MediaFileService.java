@@ -37,6 +37,41 @@ public class MediaFileService {
         this.s3Service = s3Service;
     }
 
+    public InitiateUploadResponse initiateUpload(UUID userId, InitiateUploadRequest request) {
+        if (request.getSizeBytes() > MAX_FILE_SIZE)
+            throw new BusinessException("File exceeds maximum allowed size of 500 MB");
+
+        String contentType = request.getContentType();
+        if (contentType == null) throw new BusinessException("Content type is required");
+        resolveMediaType(contentType); // validates allowed types
+
+        String s3Key    = s3Service.generateKey(userId, request.getFilename());
+        String uploadUrl = s3Service.generatePresignedPutUrl(s3Key, contentType);
+        return new InitiateUploadResponse(uploadUrl, s3Key);
+    }
+
+    public MediaFileResponse confirmUpload(UUID userId, ConfirmUploadRequest request) {
+        String expectedPrefix = "media/" + userId + "/";
+        if (!request.getS3Key().startsWith(expectedPrefix))
+            throw new BusinessException("Invalid S3 key");
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        MediaType mediaType = resolveMediaType(request.getContentType());
+
+        MediaFile mediaFile = MediaFile.builder()
+                .user(user)
+                .s3Key(request.getS3Key())
+                .originalName(request.getOriginalName())
+                .mediaType(mediaType)
+                .sizeBytes(request.getSizeBytes())
+                .build();
+
+        MediaFile saved = mediaFileRepository.save(mediaFile);
+        return toResponse(saved, s3Service.generatePresignedUrl(saved.getS3Key()));
+    }
+
     public MediaFileResponse upload(UUID userId, MultipartFile file) throws IOException {
         if (file.isEmpty()) throw new BusinessException("File must not be empty");
         if (file.getSize() > MAX_FILE_SIZE) throw new BusinessException("File exceeds maximum allowed size of 500 MB");

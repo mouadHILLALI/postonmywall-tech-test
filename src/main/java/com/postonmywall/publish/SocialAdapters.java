@@ -2,7 +2,6 @@ package com.postonmywall.publish;
 
 import com.postonmywall.common.Platform;
 import com.postonmywall.exception.SocialApiException;
-import com.postonmywall.publish.SocialMediaAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,10 +11,20 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
-// ─── Shared constants ─────────────────────────────────────
+// ─── Shared base ──────────────────────────────────────────
 
 abstract class BaseAdapter {
     protected static final Duration TIMEOUT = Duration.ofSeconds(15);
@@ -46,22 +55,22 @@ class TikTokAdapter extends BaseAdapter implements SocialMediaAdapter {
     public Platform getPlatform() { return Platform.TIKTOK; }
 
     @Override
-    public String publish(String accessToken, String tokenSecret,
+    public String publish(String accountId, String accessToken, String tokenSecret,
                           String mediaUrl, String title, String description) {
         log.info("[TIKTOK] Publishing post: title={}", title);
         try {
             Map<String, Object> body = Map.of(
-                "post_info", Map.of(
-                    "title", title.substring(0, Math.min(title.length(), 150)),
-                    "privacy_level", "SELF_ONLY",
-                    "disable_duet", false,
-                    "disable_comment", false,
-                    "disable_stitch", false
-                ),
-                "source_info", Map.of(
-                    "source", "PULL_FROM_URL",
-                    "video_url", mediaUrl
-                )
+                    "post_info", Map.of(
+                            "title", title.substring(0, Math.min(title.length(), 150)),
+                            "privacy_level", "SELF_ONLY",
+                            "disable_duet", false,
+                            "disable_comment", false,
+                            "disable_stitch", false
+                    ),
+                    "source_info", Map.of(
+                            "source", "PULL_FROM_URL",
+                            "video_url", mediaUrl
+                    )
             );
 
             @SuppressWarnings("unchecked")
@@ -111,40 +120,59 @@ class TikTokAdapter extends BaseAdapter implements SocialMediaAdapter {
 class TwitterAdapter extends BaseAdapter implements SocialMediaAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(TwitterAdapter.class);
-    private final WebClient client;
+    private final String apiKey;
+    private final String apiSecret;
 
-    TwitterAdapter(WebClient.Builder builder,
-                   @Value("${social.twitter.base-url}") String baseUrl) {
-        this.client = builder.baseUrl(baseUrl).build();
+    TwitterAdapter(@Value("${social.twitter.api-key}")    String apiKey,
+                   @Value("${social.twitter.api-secret}") String apiSecret) {
+        this.apiKey    = apiKey;
+        this.apiSecret = apiSecret;
     }
 
     @Override
     public Platform getPlatform() { return Platform.TWITTER; }
 
     @Override
-    public String publish(String accessToken, String tokenSecret,
+    public String publish(String accountId, String accessToken, String tokenSecret,
                           String mediaUrl, String title, String description) {
-        log.info("[TWITTER] Publishing tweet");
+        log.info("[TWITTER] Publishing tweet with OAuth 1.0a");
         String text = buildTweetText(title, description, mediaUrl);
-        try {
-            @SuppressWarnings("unchecked")
-            Map<?, ?> response = client.post()
-                    .uri("/tweets")
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(Map.of("text", text))
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .timeout(TIMEOUT)
-                    .block();
 
-            Map<String, Object> data = extractData(response, "TWITTER");
-            String tweetId = String.valueOf(data.get("id"));
+        try {
+            String endpoint = "https://api.twitter.com/2/tweets";
+            String body     = "{\"text\":\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
+
+            String oauthHeader = buildOAuthHeader("POST", endpoint, accessToken, tokenSecret);
+
+            URL url = new URL(endpoint);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type",  "application/json");
+            conn.setRequestProperty("Authorization", oauthHeader);
+            conn.setConnectTimeout(15_000);
+            conn.setReadTimeout(15_000);
+
+            try (var out = conn.getOutputStream()) {
+                out.write(body.getBytes(StandardCharsets.UTF_8));
+            }
+
+            int status = conn.getResponseCode();
+            if (status >= 400) {
+                String error = new String(conn.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+                throw new SocialApiException("TWITTER", "HTTP " + status + ": " + error);
+            }
+
+            String response = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            String tweetId = mapper.readTree(response).get("data").get("id").asText();
             log.info("[TWITTER] Tweet published: id={}", tweetId);
             return tweetId;
 
-        } catch (WebClientResponseException ex) {
-            throw new SocialApiException("TWITTER", "HTTP " + ex.getStatusCode() + ": " + ex.getResponseBodyAsString(), ex);
+        } catch (SocialApiException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new SocialApiException("TWITTER", ex.getMessage(), ex);
         }
     }
 
@@ -152,17 +180,66 @@ class TwitterAdapter extends BaseAdapter implements SocialMediaAdapter {
     public void remove(String accessToken, String externalPostId) {
         log.info("[TWITTER] Deleting tweet: id={}", externalPostId);
         try {
-            client.delete()
-                    .uri("/tweets/" + externalPostId)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-                    .retrieve()
-                    .toBodilessEntity()
-                    .timeout(TIMEOUT)
-                    .block();
+            String endpoint    = "https://api.twitter.com/2/tweets/" + externalPostId;
+            String oauthHeader = buildOAuthHeader("DELETE", endpoint, accessToken, externalPostId);
+
+            URL url = new URL(endpoint);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("DELETE");
+            conn.setRequestProperty("Authorization", oauthHeader);
+            conn.setConnectTimeout(15_000);
+            conn.setReadTimeout(15_000);
+
+            int status = conn.getResponseCode();
+            if (status >= 400) {
+                String error = new String(conn.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+                throw new SocialApiException("TWITTER", "HTTP " + status + ": " + error);
+            }
             log.info("[TWITTER] Tweet deleted: id={}", externalPostId);
-        } catch (WebClientResponseException ex) {
-            throw new SocialApiException("TWITTER", "HTTP " + ex.getStatusCode() + ": " + ex.getResponseBodyAsString(), ex);
+
+        } catch (SocialApiException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new SocialApiException("TWITTER", ex.getMessage(), ex);
         }
+    }
+
+    // ─── OAuth 1.0a signing ───────────────────────────────
+
+    private String buildOAuthHeader(String method, String url,
+                                    String accessToken, String tokenSecret) throws Exception {
+        String nonce     = UUID.randomUUID().toString().replace("-", "");
+        String timestamp = String.valueOf(System.currentTimeMillis() / 1000);
+
+        TreeMap<String, String> params = new TreeMap<>();
+        params.put("oauth_consumer_key",     apiKey);
+        params.put("oauth_nonce",            nonce);
+        params.put("oauth_signature_method", "HMAC-SHA1");
+        params.put("oauth_timestamp",        timestamp);
+        params.put("oauth_token",            accessToken);
+        params.put("oauth_version",          "1.0");
+
+        String paramString = params.entrySet().stream()
+                .map(e -> encode(e.getKey()) + "=" + encode(e.getValue()))
+                .collect(Collectors.joining("&"));
+
+        String baseString = method + "&" + encode(url) + "&" + encode(paramString);
+        String signingKey = encode(apiSecret) + "&" + encode(tokenSecret);
+
+        Mac mac = Mac.getInstance("HmacSHA1");
+        mac.init(new SecretKeySpec(signingKey.getBytes(StandardCharsets.UTF_8), "HmacSHA1"));
+        String signature = Base64.getEncoder().encodeToString(
+                mac.doFinal(baseString.getBytes(StandardCharsets.UTF_8)));
+
+        params.put("oauth_signature", signature);
+
+        return "OAuth " + params.entrySet().stream()
+                .map(e -> encode(e.getKey()) + "=\"" + encode(e.getValue()) + "\"")
+                .collect(Collectors.joining(", "));
+    }
+
+    private String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private String buildTweetText(String title, String description, String mediaUrl) {
@@ -193,16 +270,16 @@ class InstagramAdapter extends BaseAdapter implements SocialMediaAdapter {
     public Platform getPlatform() { return Platform.INSTAGRAM; }
 
     @Override
-    public String publish(String accessToken, String tokenSecret,
+    public String publish(String accountId, String accessToken, String tokenSecret,
                           String mediaUrl, String title, String description) {
-        log.info("[INSTAGRAM] Publishing media");
+        log.info("[INSTAGRAM] Publishing media for igUserId={}", accountId);
         try {
             String caption = buildCaption(title, description);
+            String igUserId = accountId;
 
-            // Step 1: Create media container
             @SuppressWarnings("unchecked")
             Map<?, ?> containerResponse = client.post()
-                    .uri(ub -> ub.path("/me/media")
+                    .uri(ub -> ub.path("/" + igUserId + "/media")
                             .queryParam("image_url", mediaUrl)
                             .queryParam("caption", caption)
                             .queryParam("access_token", accessToken)
@@ -217,10 +294,9 @@ class InstagramAdapter extends BaseAdapter implements SocialMediaAdapter {
 
             String containerId = String.valueOf(containerResponse.get("id"));
 
-            // Step 2: Publish the container
             @SuppressWarnings("unchecked")
             Map<?, ?> publishResponse = client.post()
-                    .uri(ub -> ub.path("/me/media_publish")
+                    .uri(ub -> ub.path("/" + igUserId + "/media_publish")
                             .queryParam("creation_id", containerId)
                             .queryParam("access_token", accessToken)
                             .build())
@@ -243,10 +319,8 @@ class InstagramAdapter extends BaseAdapter implements SocialMediaAdapter {
 
     @Override
     public void remove(String accessToken, String externalPostId) {
-        // Instagram Graph API does not support post deletion for most app types.
-        // We log and let PublishService mark the record as REMOVED in the DB.
         log.warn("[INSTAGRAM] Post deletion via API is not supported for standard apps. " +
-                 "Post id={} will be marked as REMOVED locally only.", externalPostId);
+                "Post id={} will be marked as REMOVED locally only.", externalPostId);
     }
 
     private String buildCaption(String title, String description) {
@@ -273,17 +347,17 @@ class YouTubeAdapter extends BaseAdapter implements SocialMediaAdapter {
     public Platform getPlatform() { return Platform.YOUTUBE; }
 
     @Override
-    public String publish(String accessToken, String tokenSecret,
+    public String publish(String accountId, String accessToken, String tokenSecret,
                           String mediaUrl, String title, String description) {
         log.info("[YOUTUBE] Publishing video");
         try {
             Map<String, Object> body = Map.of(
-                "snippet", Map.of(
-                    "title", title.substring(0, Math.min(title.length(), 100)),
-                    "description", description != null ? description.substring(0, Math.min(description.length(), 5000)) : "",
-                    "categoryId", "22"
-                ),
-                "status", Map.of("privacyStatus", "private")
+                    "snippet", Map.of(
+                            "title",       title.substring(0, Math.min(title.length(), 100)),
+                            "description", description != null ? description.substring(0, Math.min(description.length(), 5000)) : "",
+                            "categoryId",  "22"
+                    ),
+                    "status", Map.of("privacyStatus", "private")
             );
 
             @SuppressWarnings("unchecked")

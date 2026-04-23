@@ -45,6 +45,12 @@ public class SocialAccount {
     @Column(name = "token_secret", columnDefinition = "TEXT")
     private String tokenSecret;
 
+    @Column(name = "refresh_token", columnDefinition = "TEXT")
+    private String refreshToken;
+
+    @Column(name = "token_expires_at")
+    private Instant tokenExpiresAt;
+
     @Column(nullable = false)
     private boolean active = true;
 

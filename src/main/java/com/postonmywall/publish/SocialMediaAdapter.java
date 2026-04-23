@@ -20,7 +20,7 @@ public interface SocialMediaAdapter {
      * @param description  Extended description (optional)
      * @return             External post ID returned by the platform
      */
-    String publish(String accessToken, String tokenSecret,
+    String publish(String accountId, String accessToken, String tokenSecret,
                    String mediaUrl, String title, String description);
 
     /**

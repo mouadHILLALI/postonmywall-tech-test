@@ -3,6 +3,7 @@ package com.postonmywall.file;
 import com.postonmywall.common.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -25,6 +26,27 @@ public class MediaFileController {
 
     public MediaFileController(MediaFileService mediaFileService) {
         this.mediaFileService = mediaFileService;
+    }
+
+    @PostMapping("/initiate")
+    @Operation(summary = "Get a presigned S3 PUT URL for direct browser-to-S3 upload")
+    public ResponseEntity<ApiResponse<InitiateUploadResponse>> initiateUpload(
+            @AuthenticationPrincipal UserDetails principal,
+            @Valid @RequestBody InitiateUploadRequest request) {
+
+        InitiateUploadResponse response = mediaFileService.initiateUpload(userId(principal), request);
+        return ResponseEntity.ok(ApiResponse.ok(response));
+    }
+
+    @PostMapping("/confirm")
+    @Operation(summary = "Confirm a completed S3 upload and persist the file metadata")
+    public ResponseEntity<ApiResponse<MediaFileResponse>> confirmUpload(
+            @AuthenticationPrincipal UserDetails principal,
+            @Valid @RequestBody ConfirmUploadRequest request) {
+
+        MediaFileResponse response = mediaFileService.confirmUpload(userId(principal), request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(response, "File uploaded successfully"));
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
