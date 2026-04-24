@@ -13,8 +13,7 @@ import com.postonmywall.file.MediaFile;
 import com.postonmywall.file.MediaFileService;
 import com.postonmywall.file.S3Service;
 import com.postonmywall.scheduler.ScheduledPublish;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -24,11 +23,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @Transactional
 public class PublishService {
-
-    private static final Logger log = LoggerFactory.getLogger(PublishService.class);
 
     private final PublishLogRepository publishLogRepository;
     private final MediaFileService mediaFileService;
@@ -89,13 +87,13 @@ public class PublishService {
                 );
             } catch (SocialApiException ex) {
                 if (isTokenExpired(ex) && socialAccount.getPlatform() == Platform.YOUTUBE
-                        && socialAccount.getTokenSecret() != null) {
-                    String newToken = googleTokenRefresher.refresh(socialAccount.getTokenSecret());
+                        && socialAccount.getRefreshToken() != null) {
+                    String newToken = googleTokenRefresher.refresh(socialAccount.getRefreshToken());
                     socialAccountService.updateAccessToken(socialAccount.getId(), newToken);
                     externalPostId = adapter.publish(
                             socialAccount.getAccountId(),
                             newToken,
-                            socialAccount.getTokenSecret(),
+                            socialAccount.getRefreshToken(),
                             mediaUrl,
                             request.getTitle(),
                             request.getDescription()

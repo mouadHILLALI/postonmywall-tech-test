@@ -2,8 +2,7 @@ package com.postonmywall.oauth;
 
 import com.postonmywall.account.SocialAccountService;
 import com.postonmywall.common.Platform;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
@@ -14,6 +13,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -22,10 +22,9 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class OAuthService {
-
-    private static final Logger log = LoggerFactory.getLogger(OAuthService.class);
 
     // ── Twitter / X (OAuth 2.0 + PKCE) ──────────────────────────
     @Value("${oauth.twitter.client-id:}") private String twitterClientId;
@@ -38,6 +37,8 @@ public class OAuthService {
     // ── TikTok ───────────────────────────────────────────────────
     @Value("${oauth.tiktok.client-key:}") private String tiktokClientKey;
     @Value("${oauth.tiktok.client-secret:}") private String tiktokClientSecret;
+    /** TikTok requires HTTPS — set to your ngrok URL in dev, same as callback-base-url in prod. */
+    @Value("${oauth.tiktok.callback-base-url:}") private String tiktokCallbackBaseUrl;
 
     // ── YouTube / Google ─────────────────────────────────────────
     @Value("${oauth.youtube.client-id:}") private String youtubeClientId;
@@ -46,6 +47,10 @@ public class OAuthService {
     /** The backend's public base URL — used as redirect_uri registered with each platform. */
     @Value("${oauth.callback-base-url:http://localhost:8080}")
     private String callbackBaseUrl;
+
+    /** The frontend's base URL — used to redirect the browser after the OAuth callback. */
+    @Value("${oauth.frontend-base-url:http://localhost:4200}")
+    private String frontendBaseUrl;
 
     private final OAuthStateStore stateStore;
     private final SocialAccountService accountService;
@@ -74,7 +79,7 @@ public class OAuthService {
         OAuthStateStore.OAuthState oauthState = stateStore.consume(state).orElse(null);
         if (oauthState == null) {
             // State invalid — redirect to a generic frontend path
-            return OAuthCallbackResult.error(null, callbackBaseUrl.replace(":8080", ":4200") + "/oauth/callback",
+            return OAuthCallbackResult.error(null, frontendBaseUrl + "/oauth/callback",
                     "Invalid or expired authorization request. Please try again.");
         }
 
@@ -92,7 +97,7 @@ public class OAuthService {
         } catch (Exception e) {
             log.error("OAuth callback error for {}: {}", oauthState.platform(), e.getMessage(), e);
             return OAuthCallbackResult.error(oauthState.platform(), oauthState.frontendRedirectUri(),
-                    "Failed to connect account. Please try again.");
+                    e.getMessage() != null ? e.getMessage() : "Failed to connect account. Please try again.");
         }
     }
 
@@ -111,7 +116,7 @@ public class OAuthService {
                 .queryParam("state", state)
                 .queryParam("code_challenge", challenge)
                 .queryParam("code_challenge_method", "S256")
-                .build().toUriString();
+                .encode().build().toUriString();
     }
 
     private OAuthCallbackResult handleTwitterCallback(String code, OAuthStateStore.OAuthState oauthState) {
@@ -140,17 +145,17 @@ public class OAuthService {
         return OAuthCallbackResult.success(Platform.TWITTER, oauthState.frontendRedirectUri());
     }
 
-    // ── Instagram (Facebook Graph API) ────────────────────────────
+    // ── Instagram Business Login API ──────────────────────────────
 
     private String buildInstagramUrl(UUID userId, String frontendRedirectUri) {
         String state = stateStore.save(userId, Platform.INSTAGRAM, frontendRedirectUri, null);
         return UriComponentsBuilder.fromHttpUrl("https://www.facebook.com/v19.0/dialog/oauth")
                 .queryParam("client_id", instagramClientId)
                 .queryParam("redirect_uri", backendCallback())
-                .queryParam("scope", "instagram_basic,instagram_content_publish,pages_read_engagement,pages_show_list")
+                .queryParam("scope", "instagram_basic,instagram_content_publish")
                 .queryParam("state", state)
                 .queryParam("response_type", "code")
-                .build().toUriString();
+                .encode().build().toUriString();
     }
 
     private OAuthCallbackResult handleInstagramCallback(String code, OAuthStateStore.OAuthState oauthState) {
@@ -160,79 +165,50 @@ public class OAuthService {
                 .queryParam("client_secret", instagramClientSecret)
                 .queryParam("redirect_uri", backendCallback())
                 .queryParam("code", code)
-                .build().toUriString();
+                .encode().build().toUriString();
 
         Map<String, Object> shortToken = getJson(tokenUrl, null);
-        String fbToken = (String) shortToken.get("access_token");
+        String shortLivedToken = (String) shortToken.get("access_token");
 
         // Exchange for long-lived token (~60 days)
         String longTokenUrl = UriComponentsBuilder.fromHttpUrl("https://graph.facebook.com/v19.0/oauth/access_token")
                 .queryParam("grant_type", "fb_exchange_token")
                 .queryParam("client_id", instagramClientId)
                 .queryParam("client_secret", instagramClientSecret)
-                .queryParam("fb_exchange_token", fbToken)
-                .build().toUriString();
+                .queryParam("fb_exchange_token", shortLivedToken)
+                .encode().build().toUriString();
 
         Map<String, Object> longToken = getJson(longTokenUrl, null);
         String accessToken = (String) longToken.get("access_token");
         Object expiresIn   = longToken.get("expires_in");
         Instant expiresAt  = expiresIn != null ? Instant.now().plusSeconds(((Number) expiresIn).longValue()) : null;
 
-        // Try to find Instagram Business account, fall back to Facebook name
-        String accountId = fetchInstagramAccountId(accessToken);
+        // Get Facebook user name as a display identifier
+        String meUrl = "https://graph.facebook.com/v19.0/me?fields=id,name&access_token="
+                + URLEncoder.encode(accessToken, StandardCharsets.UTF_8);
+        Map<String, Object> me = getJson(meUrl, null);
+        String accountId = (String) me.getOrDefault("name", me.get("id"));
 
         accountService.upsertOAuthAccount(oauthState.userId(), Platform.INSTAGRAM,
                 accountId, accessToken, null, expiresAt);
         return OAuthCallbackResult.success(Platform.INSTAGRAM, oauthState.frontendRedirectUri());
     }
 
-    private String fetchInstagramAccountId(String accessToken) {
-        try {
-            String pagesUrl = UriComponentsBuilder.fromHttpUrl("https://graph.facebook.com/v19.0/me/accounts")
-                    .queryParam("fields", "instagram_business_account{username}")
-                    .queryParam("access_token", accessToken)
-                    .build().toUriString();
-
-            Map<String, Object> pages = getJson(pagesUrl, null);
-            @SuppressWarnings("unchecked")
-            java.util.List<Map<String, Object>> pageList = (java.util.List<Map<String, Object>>) pages.get("data");
-            if (pageList != null) {
-                for (Map<String, Object> page : pageList) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> igAccount = (Map<String, Object>) page.get("instagram_business_account");
-                    if (igAccount != null && igAccount.get("username") != null) {
-                        return "@" + igAccount.get("username");
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Could not fetch Instagram username, falling back to FB name: {}", e.getMessage());
-        }
-
-        // Fallback: Facebook user name
-        try {
-            String meUrl = UriComponentsBuilder.fromHttpUrl("https://graph.facebook.com/v19.0/me")
-                    .queryParam("fields", "id,name")
-                    .queryParam("access_token", accessToken)
-                    .build().toUriString();
-            Map<String, Object> me = getJson(meUrl, null);
-            return (String) me.getOrDefault("name", "instagram_user");
-        } catch (Exception e) {
-            return "instagram_user";
-        }
-    }
-
     // ── TikTok ────────────────────────────────────────────────────
 
     private String buildTikTokUrl(UUID userId, String frontendRedirectUri) {
-        String state = stateStore.save(userId, Platform.TIKTOK, frontendRedirectUri, null);
+        String verifier  = generateCodeVerifier();
+        String challenge = generateCodeChallenge(verifier);
+        String state     = stateStore.save(userId, Platform.TIKTOK, frontendRedirectUri, verifier);
         return UriComponentsBuilder.fromHttpUrl("https://www.tiktok.com/v2/auth/authorize/")
                 .queryParam("client_key", tiktokClientKey)
-                .queryParam("redirect_uri", backendCallback())
+                .queryParam("redirect_uri", tiktokCallback())
                 .queryParam("scope", "user.info.basic,video.upload")
                 .queryParam("state", state)
                 .queryParam("response_type", "code")
-                .build().toUriString();
+                .queryParam("code_challenge", challenge)
+                .queryParam("code_challenge_method", "S256")
+                .encode().build().toUriString();
     }
 
     private OAuthCallbackResult handleTikTokCallback(String code, OAuthStateStore.OAuthState oauthState) {
@@ -241,7 +217,8 @@ public class OAuthService {
         form.add("client_secret", tiktokClientSecret);
         form.add("code", code);
         form.add("grant_type", "authorization_code");
-        form.add("redirect_uri", backendCallback());
+        form.add("redirect_uri", tiktokCallback());
+        form.add("code_verifier", oauthState.codeVerifier());
 
         Map<String, Object> tokenRes = postForm("https://open.tiktokapis.com/v2/oauth/token/", form, null);
         @SuppressWarnings("unchecked")
@@ -275,7 +252,7 @@ public class OAuthService {
                 .queryParam("response_type", "code")
                 .queryParam("access_type", "offline")
                 .queryParam("prompt", "consent")
-                .build().toUriString();
+                .encode().build().toUriString();
     }
 
     private OAuthCallbackResult handleYouTubeCallback(String code, OAuthStateStore.OAuthState oauthState) {
@@ -351,5 +328,11 @@ public class OAuthService {
 
     private String backendCallback() {
         return callbackBaseUrl + "/oauth/callback";
+    }
+
+    private String tiktokCallback() {
+        String base = (tiktokCallbackBaseUrl != null && !tiktokCallbackBaseUrl.isBlank())
+                ? tiktokCallbackBaseUrl : callbackBaseUrl;
+        return base + "/oauth/callback";
     }
 }

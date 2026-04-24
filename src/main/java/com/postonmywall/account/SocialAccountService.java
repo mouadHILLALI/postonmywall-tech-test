@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 @Transactional
@@ -53,7 +52,7 @@ public class SocialAccountService {
         return socialAccountRepository.findAllByUserIdAndActiveTrue(userId)
                 .stream()
                 .map(this::toResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     public void unlinkAccount(UUID userId, UUID accountId) {
