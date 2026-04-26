@@ -54,9 +54,10 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(
-                "http://localhost:4200",   // Angular dev server
-                "http://localhost:80",     // Angular production (Docker)
-                "http://localhost"         // Angular production (Docker)
+                "http://localhost:4200",
+                "http://localhost:80",
+                "http://localhost",
+                "https://postonmywall-front.vercel.app"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         config.setAllowedHeaders(List.of("*"));
