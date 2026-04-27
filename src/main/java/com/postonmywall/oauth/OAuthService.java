@@ -221,11 +221,9 @@ public class OAuthService {
         form.add("code_verifier", oauthState.codeVerifier());
 
         Map<String, Object> tokenRes = postForm("https://open.tiktokapis.com/v2/oauth/token/", form, null);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> data = (Map<String, Object>) tokenRes.get("data");
-        String accessToken  = (String) data.get("access_token");
-        String refreshToken = (String) data.get("refresh_token");
-        Object expiresIn    = data.get("expires_in");
+        String accessToken  = (String) tokenRes.get("access_token");
+        String refreshToken = (String) tokenRes.get("refresh_token");
+        Object expiresIn    = tokenRes.get("expires_in");
         Instant expiresAt   = expiresIn != null ? Instant.now().plusSeconds(((Number) expiresIn).longValue()) : null;
 
         // Get display name
