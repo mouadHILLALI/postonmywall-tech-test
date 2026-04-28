@@ -13,6 +13,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 
@@ -102,7 +103,7 @@ public class YouTubeAdapter extends BaseAdapter implements SocialMediaAdapter {
         WebClient generic = WebClient.builder().build();
 
         Flux<DataBuffer> videoStream = generic.get()
-                .uri(s3Url)
+                .uri(URI.create(s3Url))
                 .retrieve()
                 .bodyToFlux(DataBuffer.class);
 
