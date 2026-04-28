@@ -212,12 +212,16 @@ public class OAuthService {
     }
 
     private OAuthCallbackResult handleTikTokCallback(String code, OAuthStateStore.OAuthState oauthState) {
+        String redirectUri = tiktokCallback();
+        log.debug("[TIKTOK] token exchange — client_key='{}' redirect_uri='{}' code_verifier='{}' code='{}'",
+                tiktokClientKey, redirectUri, oauthState.codeVerifier(), code);
+
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("client_key", tiktokClientKey);
         form.add("client_secret", tiktokClientSecret);
         form.add("code", code);
         form.add("grant_type", "authorization_code");
-        form.add("redirect_uri", tiktokCallback());
+        form.add("redirect_uri", redirectUri);
         form.add("code_verifier", oauthState.codeVerifier());
 
         Map<String, Object> tokenRes = postForm("https://open.tiktokapis.com/v2/oauth/token/", form, null);
