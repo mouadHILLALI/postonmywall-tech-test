@@ -197,24 +197,20 @@ public class OAuthService {
     // ── TikTok ────────────────────────────────────────────────────
 
     private String buildTikTokUrl(UUID userId, String frontendRedirectUri) {
-        String verifier  = generateCodeVerifier();
-        String challenge = generateCodeChallenge(verifier);
-        String state     = stateStore.save(userId, Platform.TIKTOK, frontendRedirectUri, verifier);
+        String state = stateStore.save(userId, Platform.TIKTOK, frontendRedirectUri, null);
         return UriComponentsBuilder.fromHttpUrl("https://www.tiktok.com/v2/auth/authorize/")
                 .queryParam("client_key", tiktokClientKey)
                 .queryParam("redirect_uri", tiktokCallback())
                 .queryParam("scope", "user.info.basic,video.upload")
                 .queryParam("state", state)
                 .queryParam("response_type", "code")
-                .queryParam("code_challenge", challenge)
-                .queryParam("code_challenge_method", "S256")
                 .encode().build().toUriString();
     }
 
     private OAuthCallbackResult handleTikTokCallback(String code, OAuthStateStore.OAuthState oauthState) {
         String redirectUri = tiktokCallback();
-        log.debug("[TIKTOK] token exchange — client_key='{}' redirect_uri='{}' code_verifier='{}' code='{}'",
-                tiktokClientKey, redirectUri, oauthState.codeVerifier(), code);
+        log.debug("[TIKTOK] token exchange — client_key='{}' redirect_uri='{}' code='{}'",
+                tiktokClientKey, redirectUri, code);
 
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("client_key", tiktokClientKey);
@@ -222,7 +218,6 @@ public class OAuthService {
         form.add("code", code);
         form.add("grant_type", "authorization_code");
         form.add("redirect_uri", redirectUri);
-        form.add("code_verifier", oauthState.codeVerifier());
 
         Map<String, Object> tokenRes = postForm("https://open.tiktokapis.com/v2/oauth/token/", form, null);
         log.debug("TikTok token response: {}", tokenRes);
