@@ -209,13 +209,16 @@ public class OAuthService {
 
     private OAuthCallbackResult handleTikTokCallback(String code, OAuthStateStore.OAuthState oauthState) {
         String redirectUri = tiktokCallback();
-        log.debug("[TIKTOK] token exchange — client_key='{}' redirect_uri='{}' code='{}'",
-                tiktokClientKey, redirectUri, code);
+        // Re-encode the code so characters like '*' and '!' that Java's URLEncoder
+        // treats as safe are properly percent-encoded for TikTok's token endpoint.
+        String encodedCode = URLEncoder.encode(code, StandardCharsets.UTF_8);
+        log.debug("[TIKTOK] token exchange — client_key='{}' redirect_uri='{}' raw_code='{}' encoded_code='{}'",
+                tiktokClientKey, redirectUri, code, encodedCode);
 
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("client_key", tiktokClientKey);
         form.add("client_secret", tiktokClientSecret);
-        form.add("code", code);
+        form.add("code", encodedCode);
         form.add("grant_type", "authorization_code");
         form.add("redirect_uri", redirectUri);
 
