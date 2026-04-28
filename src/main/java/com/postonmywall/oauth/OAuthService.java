@@ -221,10 +221,14 @@ public class OAuthService {
         form.add("code_verifier", oauthState.codeVerifier());
 
         Map<String, Object> tokenRes = postForm("https://open.tiktokapis.com/v2/oauth/token/", form, null);
+        log.debug("TikTok token response: {}", tokenRes);
         String accessToken  = (String) tokenRes.get("access_token");
         String refreshToken = (String) tokenRes.get("refresh_token");
         Object expiresIn    = tokenRes.get("expires_in");
         Instant expiresAt   = expiresIn != null ? Instant.now().plusSeconds(((Number) expiresIn).longValue()) : null;
+        if (accessToken == null) {
+            throw new RuntimeException("TikTok token exchange failed: " + tokenRes);
+        }
 
         // Get display name
         Map<String, Object> userRes = getJson(
