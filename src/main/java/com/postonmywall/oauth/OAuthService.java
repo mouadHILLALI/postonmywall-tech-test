@@ -146,14 +146,14 @@ public class OAuthService {
         return OAuthCallbackResult.success(Platform.TWITTER, oauthState.frontendRedirectUri());
     }
 
-    // ── Instagram Business Login API ──────────────────────────────
+    // ── Instagram Business Login API (new standalone Instagram OAuth) ─
 
     private String buildInstagramUrl(UUID userId, String frontendRedirectUri) {
         String state = stateStore.save(userId, Platform.INSTAGRAM, frontendRedirectUri, null);
-        return UriComponentsBuilder.fromHttpUrl("https://www.facebook.com/v19.0/dialog/oauth")
+        return UriComponentsBuilder.fromHttpUrl("https://www.instagram.com/oauth/authorize")
                 .queryParam("client_id", instagramClientId)
                 .queryParam("redirect_uri", backendCallback())
-                .queryParam("scope", "instagram_basic,instagram_content_publish")
+                .queryParam("scope", "instagram_business_basic,instagram_content_publish")
                 .queryParam("state", state)
                 .queryParam("response_type", "code")
                 .encode().build().toUriString();
@@ -161,22 +161,22 @@ public class OAuthService {
 
     private OAuthCallbackResult handleInstagramCallback(String code, OAuthStateStore.OAuthState oauthState) {
         // Exchange code for short-lived token
-        String tokenUrl = UriComponentsBuilder.fromHttpUrl("https://graph.facebook.com/v19.0/oauth/access_token")
-                .queryParam("client_id", instagramClientId)
-                .queryParam("client_secret", instagramClientSecret)
-                .queryParam("redirect_uri", backendCallback())
-                .queryParam("code", code)
-                .encode().build().toUriString();
+        MultiValueMap<String, String> tokenForm = new LinkedMultiValueMap<>();
+        tokenForm.add("client_id", instagramClientId);
+        tokenForm.add("client_secret", instagramClientSecret);
+        tokenForm.add("grant_type", "authorization_code");
+        tokenForm.add("redirect_uri", backendCallback());
+        tokenForm.add("code", code);
 
-        Map<String, Object> shortToken = getJson(tokenUrl, null);
-        String shortLivedToken = (String) shortToken.get("access_token");
+        Map<String, Object> shortToken = postForm("https://api.instagram.com/oauth/access_token", tokenForm, null);
+        String shortLivedToken = String.valueOf(shortToken.get("access_token"));
+        String igUserId        = String.valueOf(shortToken.get("user_id"));
 
         // Exchange for long-lived token (~60 days)
-        String longTokenUrl = UriComponentsBuilder.fromHttpUrl("https://graph.facebook.com/v19.0/oauth/access_token")
-                .queryParam("grant_type", "fb_exchange_token")
-                .queryParam("client_id", instagramClientId)
+        String longTokenUrl = UriComponentsBuilder.fromHttpUrl("https://graph.instagram.com/access_token")
+                .queryParam("grant_type", "ig_exchange_token")
                 .queryParam("client_secret", instagramClientSecret)
-                .queryParam("fb_exchange_token", shortLivedToken)
+                .queryParam("access_token", shortLivedToken)
                 .encode().build().toUriString();
 
         Map<String, Object> longToken = getJson(longTokenUrl, null);
@@ -184,14 +184,16 @@ public class OAuthService {
         Object expiresIn   = longToken.get("expires_in");
         Instant expiresAt  = expiresIn != null ? Instant.now().plusSeconds(((Number) expiresIn).longValue()) : null;
 
-        // Get Facebook user name as a display identifier
-        String meUrl = "https://graph.facebook.com/v19.0/me?fields=id,name&access_token="
+        // Get Instagram username for display
+        String meUrl = "https://graph.instagram.com/me?fields=username&access_token="
                 + URLEncoder.encode(accessToken, StandardCharsets.UTF_8);
         Map<String, Object> me = getJson(meUrl, null);
-        String accountId = (String) me.getOrDefault("name", me.get("id"));
+        String username = (String) me.getOrDefault("username", igUserId);
+
+        log.info("[INSTAGRAM] Connected account: username={} igUserId={}", username, igUserId);
 
         accountService.upsertOAuthAccount(oauthState.userId(), Platform.INSTAGRAM,
-                accountId, accessToken, null, expiresAt);
+                igUserId, accessToken, null, expiresAt);
         return OAuthCallbackResult.success(Platform.INSTAGRAM, oauthState.frontendRedirectUri());
     }
 
