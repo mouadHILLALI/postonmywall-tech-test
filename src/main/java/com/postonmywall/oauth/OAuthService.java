@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -209,20 +210,24 @@ public class OAuthService {
 
     private OAuthCallbackResult handleTikTokCallback(String code, OAuthStateStore.OAuthState oauthState) {
         String redirectUri = tiktokCallback();
-        // Re-encode the code so characters like '*' and '!' that Java's URLEncoder
-        // treats as safe are properly percent-encoded for TikTok's token endpoint.
-        String encodedCode = URLEncoder.encode(code, StandardCharsets.UTF_8);
-        log.debug("[TIKTOK] token exchange — client_key='{}' redirect_uri='{}' raw_code='{}' encoded_code='{}'",
-                tiktokClientKey, redirectUri, code, encodedCode);
+        log.debug("[TIKTOK] token exchange — client_key='{}' redirect_uri='{}' code='{}'",
+                tiktokClientKey, redirectUri, code);
 
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("client_key", tiktokClientKey);
         form.add("client_secret", tiktokClientSecret);
-        form.add("code", encodedCode);
+        form.add("code", code);
         form.add("grant_type", "authorization_code");
         form.add("redirect_uri", redirectUri);
 
-        Map<String, Object> tokenRes = postForm("https://open.tiktokapis.com/v2/oauth/token/", form, null);
+        Map<String, Object> tokenRes = WebClient.create().post()
+                .uri("https://open.tiktokapis.com/v2/oauth/token/")
+                .header("Cache-Control", "no-cache")
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(BodyInserters.fromFormData(form))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
         log.debug("TikTok token response: {}", tokenRes);
         String accessToken  = (String) tokenRes.get("access_token");
         String refreshToken = (String) tokenRes.get("refresh_token");
