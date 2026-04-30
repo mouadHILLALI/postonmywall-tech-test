@@ -13,8 +13,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
-
 import java.io.IOException;
 import java.util.UUID;
 
@@ -31,17 +29,18 @@ public class MediaFileController {
 
     /** Public endpoint — no JWT required. Used by Instagram to download media for publishing. */
     @GetMapping("/{fileId}/stream")
-    public ResponseEntity<StreamingResponseBody> streamFile(@PathVariable UUID fileId) {
+    public ResponseEntity<byte[]> streamFile(@PathVariable UUID fileId) throws IOException {
         MediaFile file = mediaFileService.findById(fileId);
-        var s3Object = mediaFileService.getS3Service().getObject(file.getS3Key());
+        byte[] bytes;
+        try (var s3Object = mediaFileService.getS3Service().getObject(file.getS3Key())) {
+            bytes = s3Object.readAllBytes();
+        }
         String contentType = contentTypeFromFilename(file.getOriginalName());
-        StreamingResponseBody body = out -> {
-            try (s3Object) { s3Object.transferTo(out); }
-        };
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
-                .header("Content-Disposition", "inline; filename=\"" + file.getOriginalName() + "\"")
-                .body(body);
+                .contentLength(bytes.length)
+                .header("Cache-Control", "public, max-age=300")
+                .body(bytes);
     }
 
     private static String contentTypeFromFilename(String name) {
