@@ -153,7 +153,7 @@ public class OAuthService {
         return UriComponentsBuilder.fromHttpUrl("https://www.instagram.com/oauth/authorize")
                 .queryParam("client_id", instagramClientId)
                 .queryParam("redirect_uri", backendCallback())
-                .queryParam("scope", "instagram_business_basic,instagram_content_publish")
+                .queryParam("scope", "instagram_business_basic,instagram_business_content_publish")
                 .queryParam("state", state)
                 .queryParam("response_type", "code")
                 .encode().build().toUriString();
