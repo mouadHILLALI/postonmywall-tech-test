@@ -35,11 +35,13 @@ public class InstagramAdapter extends BaseAdapter implements SocialMediaAdapter 
 
             @SuppressWarnings("unchecked")
             Map<?, ?> containerResponse = client.post()
-                    .uri(ub -> ub.path("/" + accountId + "/media")
-                            .queryParam("image_url", mediaUrl)
-                            .queryParam("caption", caption)
-                            .queryParam("access_token", accessToken)
-                            .build())
+                    .uri("/" + accountId + "/media")
+                    .header(org.springframework.http.HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                    .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of(
+                            "image_url", mediaUrl,
+                            "caption",   caption
+                    ))
                     .retrieve()
                     .bodyToMono(Map.class)
                     .timeout(TIMEOUT)
@@ -52,10 +54,10 @@ public class InstagramAdapter extends BaseAdapter implements SocialMediaAdapter 
 
             @SuppressWarnings("unchecked")
             Map<?, ?> publishResponse = client.post()
-                    .uri(ub -> ub.path("/" + accountId + "/media_publish")
-                            .queryParam("creation_id", containerId)
-                            .queryParam("access_token", accessToken)
-                            .build())
+                    .uri("/" + accountId + "/media_publish")
+                    .header(org.springframework.http.HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                    .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of("creation_id", containerId))
                     .retrieve()
                     .bodyToMono(Map.class)
                     .timeout(TIMEOUT)
