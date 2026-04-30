@@ -13,6 +13,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -26,6 +27,35 @@ public class MediaFileController {
 
     public MediaFileController(MediaFileService mediaFileService) {
         this.mediaFileService = mediaFileService;
+    }
+
+    /** Public endpoint — no JWT required. Used by Instagram to download media for publishing. */
+    @GetMapping("/{fileId}/stream")
+    public ResponseEntity<StreamingResponseBody> streamFile(@PathVariable UUID fileId) {
+        MediaFile file = mediaFileService.findById(fileId);
+        var s3Object = mediaFileService.getS3Service().getObject(file.getS3Key());
+        String contentType = contentTypeFromFilename(file.getOriginalName());
+        StreamingResponseBody body = out -> {
+            try (s3Object) { s3Object.transferTo(out); }
+        };
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header("Content-Disposition", "inline; filename=\"" + file.getOriginalName() + "\"")
+                .body(body);
+    }
+
+    private static String contentTypeFromFilename(String name) {
+        if (name == null) return "application/octet-stream";
+        String n = name.toLowerCase();
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+        if (n.endsWith(".png"))  return "image/png";
+        if (n.endsWith(".gif"))  return "image/gif";
+        if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".mp4"))  return "video/mp4";
+        if (n.endsWith(".mov"))  return "video/quicktime";
+        if (n.endsWith(".webm")) return "video/webm";
+        if (n.endsWith(".mp3"))  return "audio/mpeg";
+        return "application/octet-stream";
     }
 
     @PostMapping("/initiate")

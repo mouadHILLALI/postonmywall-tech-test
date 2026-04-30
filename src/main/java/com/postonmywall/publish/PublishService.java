@@ -14,6 +14,7 @@ import com.postonmywall.file.MediaFileService;
 import com.postonmywall.file.S3Service;
 import com.postonmywall.scheduler.ScheduledPublish;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,9 @@ import java.util.UUID;
 @Service
 @Transactional
 public class PublishService {
+
+    @Value("${oauth.callback-base-url:http://localhost:8080}")
+    private String backendBaseUrl;
 
     private final PublishLogRepository publishLogRepository;
     private final MediaFileService mediaFileService;
@@ -72,7 +76,10 @@ public class PublishService {
         publishLogRepository.save(publishLog);
 
         try {
-            String mediaUrl = s3Service.generatePresignedUrl(mediaFile.getS3Key(), 30);
+            // Instagram can't reliably fetch AWS presigned URLs — use the backend proxy instead
+            String mediaUrl = socialAccount.getPlatform() == Platform.INSTAGRAM
+                    ? backendBaseUrl + "/api/v1/files/" + mediaFile.getId() + "/stream"
+                    : s3Service.generatePresignedUrl(mediaFile.getS3Key(), 30);
             SocialMediaAdapter adapter = adapterRegistry.get(socialAccount.getPlatform());
 
             String externalPostId;

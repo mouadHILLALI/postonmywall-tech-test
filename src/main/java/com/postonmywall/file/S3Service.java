@@ -93,4 +93,8 @@ public class S3Service {
                 .build();
         return s3Presigner.presignGetObject(presignRequest).url().toString();
     }
+
+    public software.amazon.awssdk.core.ResponseInputStream<software.amazon.awssdk.services.s3.model.GetObjectResponse> getObject(String key) {
+        return s3Client.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build());
+    }
 }

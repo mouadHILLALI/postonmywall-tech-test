@@ -119,6 +119,14 @@ public class MediaFileService {
         mediaFileRepository.save(file);
     }
 
+    public S3Service getS3Service() { return s3Service; }
+
+    @Transactional(readOnly = true)
+    public MediaFile findById(UUID fileId) {
+        return mediaFileRepository.findById(fileId)
+                .orElseThrow(() -> new ResourceNotFoundException("Media file not found: " + fileId));
+    }
+
     // Used internally by PublishService
     public MediaFile getActiveFile(UUID userId, UUID fileId) {
         return mediaFileRepository.findByIdAndUserId(fileId, userId)
