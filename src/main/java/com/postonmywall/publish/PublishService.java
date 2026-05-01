@@ -76,9 +76,9 @@ public class PublishService {
         publishLogRepository.save(publishLog);
 
         try {
-            // Instagram can't reliably fetch AWS presigned URLs — use the backend proxy instead
+            // Instagram can't fetch presigned/proxied URLs — use direct public S3 URL
             String mediaUrl = socialAccount.getPlatform() == Platform.INSTAGRAM
-                    ? backendBaseUrl + "/api/v1/files/" + mediaFile.getId() + "/stream"
+                    ? s3Service.getPublicUrl(mediaFile.getS3Key())
                     : s3Service.generatePresignedUrl(mediaFile.getS3Key(), 30);
             SocialMediaAdapter adapter = adapterRegistry.get(socialAccount.getPlatform());
 

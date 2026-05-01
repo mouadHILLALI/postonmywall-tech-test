@@ -26,13 +26,16 @@ public class S3Service {
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
     private final String bucket;
+    private final String region;
 
     public S3Service(S3Client s3Client,
                      S3Presigner s3Presigner,
-                     @Value("${postonmywall.s3.bucket}") String bucket) {
+                     @Value("${postonmywall.s3.bucket}") String bucket,
+                     @Value("${spring.cloud.aws.region.static}") String region) {
         this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
         this.bucket = bucket;
+        this.region = region;
     }
 
     public String upload(MultipartFile file, UUID userId) throws IOException {
@@ -96,5 +99,10 @@ public class S3Service {
 
     public software.amazon.awssdk.core.ResponseInputStream<software.amazon.awssdk.services.s3.model.GetObjectResponse> getObject(String key) {
         return s3Client.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build());
+    }
+
+    /** Direct public URL — requires bucket to have public read policy on media/* */
+    public String getPublicUrl(String key) {
+        return "https://" + bucket + ".s3." + region + ".amazonaws.com/" + key;
     }
 }
