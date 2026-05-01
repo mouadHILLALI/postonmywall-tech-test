@@ -39,8 +39,9 @@ public class InstagramAdapter extends BaseAdapter implements SocialMediaAdapter 
                     .header(org.springframework.http.HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                     .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                     .bodyValue(Map.of(
-                            "image_url", mediaUrl,
-                            "caption",   caption
+                            "image_url",  mediaUrl,
+                            "caption",    caption,
+                            "media_type", "IMAGE"
                     ))
                     .retrieve()
                     .bodyToMono(Map.class)
