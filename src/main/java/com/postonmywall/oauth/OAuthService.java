@@ -200,13 +200,17 @@ public class OAuthService {
     // ── TikTok ────────────────────────────────────────────────────
 
     private String buildTikTokUrl(UUID userId, String frontendRedirectUri) {
-        String state = stateStore.save(userId, Platform.TIKTOK, frontendRedirectUri, null);
+        String verifier  = generateCodeVerifier();
+        String challenge = generateCodeChallenge(verifier);
+        String state     = stateStore.save(userId, Platform.TIKTOK, frontendRedirectUri, verifier);
         return UriComponentsBuilder.fromHttpUrl("https://www.tiktok.com/v2/auth/authorize/")
                 .queryParam("client_key", tiktokClientKey)
                 .queryParam("redirect_uri", tiktokCallback())
                 .queryParam("scope", "user.info.basic,video.upload")
                 .queryParam("state", state)
                 .queryParam("response_type", "code")
+                .queryParam("code_challenge", challenge)
+                .queryParam("code_challenge_method", "S256")
                 .encode().build().toUriString();
     }
 
@@ -221,6 +225,9 @@ public class OAuthService {
         form.add("code", code);
         form.add("grant_type", "authorization_code");
         form.add("redirect_uri", redirectUri);
+        if (oauthState.codeVerifier() != null) {
+            form.add("code_verifier", oauthState.codeVerifier());
+        }
 
         Map<String, Object> tokenRes = WebClient.create().post()
                 .uri("https://open.tiktokapis.com/v2/oauth/token/")
